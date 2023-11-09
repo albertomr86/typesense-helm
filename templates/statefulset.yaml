@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "typesense.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "typesense.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ printf "%s-headless" (include "typesense.fullname" .) }}
+  podManagementPolicy: Parallel
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "typesense.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "typesense.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "typesense.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 300
+      containers:
+        - name: instance
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "/opt/typesense-server"
+            - "--nodes"
+            - "/usr/share/typesense/nodes"
+            - "--api-port"
+            - "{{ .Values.port }}"
+            - "--peering-port"
+            - "{{ .Values.peeringPort }}"
+          env:
+            - name: TYPESENSE_DATA_DIR
+              value: {{ .Values.storage.dataDir }}
+            {{- if .Values.extraEnv }}
+            {{- toYaml .Values.extraEnv | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ default (printf "%s-apikey" (include "typesense.fullname" .)) .Values.apiKeyFromSecret }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: nodeslist
+              mountPath: /usr/share/typesense
+            - name: data
+              mountPath: {{ .Values.storage.dataDir }}
+        - name: resolver
+          image: "{{ .Values.resolver.image.repository }}:{{ .Values.resolver.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "/opt/tsns"
+            - "-namespace={{ .Release.Namespace }}"
+            - "-service={{ printf "%s-headless" (include "typesense.fullname" .) }}"
+            - "-nodes-file=/usr/share/typesense/nodes"
+            - "-api-port={{ .Values.port }}"
+            - "-peer-port={{ .Values.peeringPort }}"
+          volumeMounts:
+            - name: nodeslist
+              mountPath: /usr/share/typesense
+      volumes:
+        - name: nodeslist
+          emptyDir: {}
+        {{- if not .Values.storage.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.storage.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: {{ .Values.storage.accessMode }}
+      storageClassName: {{ .Values.storage.storageClassName }}
+      resources:
+        requests:
+          storage: {{ .Values.storage.size }}
+  {{- end }}

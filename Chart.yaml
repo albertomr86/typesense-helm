@@ -1,0 +1,11 @@
+apiVersion: v2
+name: typesense
+description: Typesense is an open-source search engine optimized for instant search-as-you-type experiences and developer productivity.
+
+type: application
+version: 0.1.0
+appVersion: "0.25.1"
+
+maintainers:
+  - name: albertomr86
+    url: https://github.com/albertomr86
